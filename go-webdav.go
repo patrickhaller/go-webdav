@@ -1,11 +1,10 @@
 package main
 
 import (
+	"golang.org/x/net/webdav"
 	"log"
 	"net/http"
 	"os"
-
-	"golang.org/x/net/webdav"
 )
 
 const (
@@ -13,9 +12,8 @@ const (
 	logLevelAll  = "all"
 	envPrefix    = "PREFIX"
 	envLoglevel  = "LOGLEVEL"
-	envInMemory  = "INMEMORY"
-	pathRoot     = "/tmp"
-	pathLog      = "/tmp/webdav.log"
+	pathRoot     = "./"
+	pathLog      = "/dev/stderr"
 )
 
 func logger() func(*http.Request, error) {
@@ -37,17 +35,15 @@ func logger() func(*http.Request, error) {
 }
 
 func filesystem() webdav.FileSystem {
-	switch os.Getenv(envInMemory) {
-	case "true":
-		log.Printf("INFO using in-memory filesystem")
-		return webdav.NewMemFS()
-	default:
-		if err := os.Mkdir(pathRoot, os.ModePerm); !os.IsExist(err) {
-			log.Fatalf("FATAL %v", err)
-		}
-		log.Printf("INFO using local filesystem at %s", pathRoot)
-		return webdav.Dir(pathRoot)
+	if err := os.Mkdir(pathRoot, os.ModePerm); !os.IsExist(err) {
+		log.Fatalf("FATAL %v", err)
 	}
+	log.Printf("INFO using local filesystem at %s", pathRoot)
+	return webdav.Dir(pathRoot)
+}
+
+func router(h *Handler) func(w http.ResponseWriter, r *http.Request) {
+	h.ServeHTTP(w, r)
 }
 
 func main() {
@@ -58,6 +54,7 @@ func main() {
 	defer logFile.Close()
 	log.SetOutput(logFile)
 
+	log.Printf("stripping url prefix = '%s'\n", os.Getenv(envPrefix))
 	h := &webdav.Handler{
 		Prefix:     os.Getenv(envPrefix),
 		FileSystem: filesystem(),
@@ -65,6 +62,6 @@ func main() {
 		Logger:     logger(),
 	}
 
-	http.HandleFunc("/", h.ServeHTTP)
+	http.HandleFunc("/", router(h))
 	http.ListenAndServe("127.0.0.1:8080", h)
 }
