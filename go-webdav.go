@@ -2,14 +2,15 @@ package main
 
 import (
 	"encoding/base64"
+	"github.com/jtblin/go-ldap-client"
 	"golang.org/x/net/webdav"
-	//"golang.org/x/sys/unix"
 	"log"
 	"net/http"
 	"os"
 	"os/user"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -47,6 +48,61 @@ func filesystem() webdav.FileSystem {
 	return webdav.Dir(pathRoot)
 }
 
+func hasFsPerms(username string) bool {
+	u, err := user.Lookup(username)
+	if err != nil {
+		return false
+	}
+
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return false
+	}
+	log.Printf("user %s has uid %d", username, uid)
+
+	if err := syscall.Setfsuid(uid); err != nil {
+		log.Printf("setfsuid for user '%s':  %v", username, err)
+		return false
+	}
+
+	if err := syscall.Setfsgid(uid); err != nil {
+		log.Printf("setfsgid for user '%s': %v", username, err)
+		return false
+	}
+
+	return true
+}
+
+func isLdap(username, pw string) bool {
+	log.Printf("user %s ldap start", username)
+	client := &ldap.LDAPClient{
+		Base:   "dc=ofs,dc=edu,dc=sg",
+		Host:   "ldap.ofs.edu.sg",
+		Port:   389,
+		UseSSL: false,
+		//BindDN:       "uid=readonlysuer,ou=people,dc=ofs,dc=edu,dc=sg",
+		//BindPassword: "readonlypassword",
+		UserFilter:  "(uid=%s)",
+		GroupFilter: "(memberUid=%s)",
+		Attributes:  []string{"givenName", "sn", "mail", "uid"},
+	}
+	// It is the responsibility of the caller to close the connection
+	defer client.Close()
+
+	ok, _, err := client.Authenticate(username, pw)
+	if err != nil {
+		log.Printf("Error authenticating user %s: %+v", username, err)
+		return false
+	}
+	if !ok {
+		log.Printf("Authentication failed for user %s", username)
+		return false
+	}
+	log.Printf("ldap auth success for user: %+v", username)
+
+	return true
+}
+
 func isAuth(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 
@@ -65,27 +121,13 @@ func isAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	if pair[0] != "phaller" && pair[1] != "pw" {
+	if isLdap(pair[0], pair[1]) == false {
+		return false
+	}
+	if hasFsPerms(pair[0]) == false {
 		return false
 	}
 	log.Printf("user %s logged in", pair[0])
-
-	u, err := user.Lookup(pair[0])
-	if err != nil {
-		return false
-	}
-
-	uid, err := strconv.Atoi(u.Uid)
-	if err != nil {
-		return false
-	}
-	log.Printf("user %s has uid %d", pair[0], uid)
-
-	/*if unix.Setuid(uid) != nil {
-		return false
-	}
-	*/
-
 	return true
 }
 
