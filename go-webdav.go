@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/user"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -103,31 +104,48 @@ func isLdap(username, pw string) bool {
 	return true
 }
 
-func isAuth(w http.ResponseWriter, r *http.Request) bool {
+func basicAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 
 	s := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
 	if len(s) != 2 {
-		return false
+		return "", "", false
 	}
 
 	b, err := base64.StdEncoding.DecodeString(s[1])
 	if err != nil {
-		return false
+		return "", "", false
 	}
 
 	pair := strings.SplitN(string(b), ":", 2)
 	if len(pair) != 2 {
+		return "", "", false
+	}
+	return pair[0], pair[1], true
+}
+
+/* goroutines mux M:N to pthreads, so lock to one pthread to keep
+   the setfsuid perms only to this goroutine
+   https://github.com/golang/go/issues/1435
+   https://github.com/golang/go/issues/20395
+*/
+func isAuth(w http.ResponseWriter, r *http.Request) bool {
+	u, p, ok := basicAuth(w, r)
+	if ok == false {
 		return false
 	}
 
-	if isLdap(pair[0], pair[1]) == false {
+	if isLdap(u, p) == false {
 		return false
 	}
-	if hasFsPerms(pair[0]) == false {
+
+	runtime.LockOSThread()
+
+	if hasFsPerms(u) == false {
 		return false
 	}
-	log.Printf("user %s logged in", pair[0])
+
+	log.Printf("user %s logged in", u)
 	return true
 }
 
