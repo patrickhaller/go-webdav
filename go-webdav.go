@@ -3,9 +3,12 @@ package main
 import (
 	"encoding/base64"
 	"golang.org/x/net/webdav"
+	//"golang.org/x/sys/unix"
 	"log"
 	"net/http"
 	"os"
+	"os/user"
+	"strconv"
 	"strings"
 )
 
@@ -62,9 +65,26 @@ func isAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	if pair[0] != "username" && pair[1] != "password" {
+	if pair[0] != "phaller" && pair[1] != "pw" {
 		return false
 	}
+	log.Printf("user %s logged in", pair[0])
+
+	u, err := user.Lookup(pair[0])
+	if err != nil {
+		return false
+	}
+
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return false
+	}
+	log.Printf("user %s has uid %d", pair[0], uid)
+
+	/*if unix.Setuid(uid) != nil {
+		return false
+	}
+	*/
 
 	return true
 }
