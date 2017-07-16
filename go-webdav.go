@@ -124,11 +124,6 @@ func basicAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	return pair[0], pair[1], true
 }
 
-/* goroutines mux M:N to pthreads, so lock to one pthread to keep
-   the setfsuid perms only to this goroutine
-   https://github.com/golang/go/issues/1435
-   https://github.com/golang/go/issues/20395
-*/
 func isAuth(w http.ResponseWriter, r *http.Request) bool {
 	u, p, ok := basicAuth(w, r)
 	if ok == false {
@@ -139,23 +134,29 @@ func isAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	runtime.LockOSThread()
-
-	if hasFsPerms(u) == false {
-		return false
-	}
-
 	log.Printf("user %s logged in", u)
 	return true
 }
 
+/* goroutines mux M:N to pthreads, so lock to one pthread to keep
+   the setfsuid perms only to this goroutine
+   https://github.com/golang/go/issues/1435
+   https://github.com/golang/go/issues/20395
+*/
 func router(h *webdav.Handler) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if isAuth(w, r) == true {
-			h.ServeHTTP(w, r)
-		} else {
-			http.Error(w, "Not authorized", 401)
+		if isAuth(w, r) == false {
+			return http.Error(w, "Not authorized", 401)
 		}
+
+		runtime.LockOSThread()
+		defer runtime.ThreadExit()
+
+		if hasFsPerms(u) == false {
+			return http.Error(w, "FS error", 500)
+		}
+
+		h.ServeHTTP(w, r)
 	}
 }
 
@@ -176,6 +177,7 @@ func main() {
 	}
 
 	http.HandleFunc("/", router(h))
+
 	if err := http.ListenAndServe("127.0.0.1:8080", nil); err != nil {
 		log.Fatalf("Cannot bind: %v", err)
 	}
