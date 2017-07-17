@@ -23,7 +23,7 @@ var cfg struct {
 	Root             string // serve webdav from here
 	Prefix           string // prefix to strip from URL path
 	LogFile          string
-	LogLevel         int // 0 (none) or 1 (errors) or 2 (all)
+	LogLevel         int // 0 (none) or 1 (errors) or 2 (requests) or 3 (all)
 	LdapBase         string
 	LdapHost         string
 	LdapPort         int
@@ -49,21 +49,32 @@ func readConfig() {
 	}
 }
 
-func logger() func(*http.Request, error) {
+func debug(f string, a ...interface{}) {
+	if cfg.LogLevel >= 3 {
+		log.Printf(f, a...)
+	}
+}
+
+func logRequest(username string) func(*http.Request, error) {
 	switch cfg.LogLevel {
-	case 0:
-		return nil
+	case 3:
+		fallthrough
 	case 2:
 		return func(r *http.Request, err error) {
-			log.Printf("REQUEST %s %s length:%d %s %s\n", r.Method, r.URL,
+			log.Printf("REQUEST %s %s %s length:%d %s %s\n", username, r.Method, r.URL,
 				r.ContentLength, r.RemoteAddr, r.UserAgent())
-		}
-	default:
-		return func(r *http.Request, err error) {
 			if err != nil {
-				log.Printf("ERROR %v\n", err)
+				log.Printf("ERROR %s %s %s %v\n", username, r.Method, r.URL, err)
 			}
 		}
+	case 1:
+		return func(r *http.Request, err error) {
+			if err != nil {
+				log.Printf("ERROR %s %s %s %v\n", username, r.Method, r.URL, err)
+			}
+		}
+	default:
+		return nil
 	}
 }
 
@@ -73,7 +84,7 @@ func filesystem(username string) webdav.FileSystem {
 		log.Printf("FS for user `%s' at `%s' does not exist: %v", username, dir, err)
 		return nil
 	}
-	log.Printf("using local filesystem at %s\n", dir)
+	debug("using local filesystem at %s\n", dir)
 	return webdav.Dir(dir)
 }
 
@@ -87,15 +98,15 @@ func hasFsPerms(username string) bool {
 	if err != nil {
 		return false
 	}
-	log.Printf("user %s has uid %d", username, uid)
+	debug("user %s has uid %d", username, uid)
 
 	if err := syscall.Setfsuid(uid); err != nil {
-		log.Printf("setfsuid for user '%s':  %v", username, err)
+		log.Printf("setfsuid failed for user '%s':  %v", username, err)
 		return false
 	}
 
 	if err := syscall.Setfsgid(uid); err != nil {
-		log.Printf("setfsgid for user '%s': %v", username, err)
+		log.Printf("setfsgid failed for user '%s': %v", username, err)
 		return false
 	}
 
@@ -103,7 +114,7 @@ func hasFsPerms(username string) bool {
 }
 
 func isLdap(username, pw string) bool {
-	log.Printf("user %s ldap start", username)
+	debug("user %s ldap start", username)
 	client := ldap.LDAPClient{
 		Base:       cfg.LdapBase,
 		Host:       cfg.LdapHost,
@@ -136,7 +147,7 @@ func isLdap(username, pw string) bool {
 		log.Printf("ldap auth failed for user `%s'", username)
 		return false
 	}
-	log.Printf("ldap auth success for user: `%s'", username)
+	debug("ldap auth success for user: `%s'", username)
 
 	return true
 }
@@ -171,7 +182,7 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 
-	log.Printf("user %s logged in", u)
+	debug("user %s logged in", u)
 	return u, true
 }
 
@@ -200,7 +211,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 		Prefix:     cfg.Prefix,
 		LockSystem: webdavLockSystem,
 		FileSystem: filesystem(username),
-		Logger:     logger(),
+		Logger:     logRequest(username),
 	}
 
 	h.ServeHTTP(w, r)
@@ -219,6 +230,6 @@ func main() {
 
 	http.HandleFunc("/", router)
 	if err := http.ListenAndServe(cfg.Port, nil); err != nil {
-		log.Fatalf("Cannot bind: %v", err)
+		log.Fatalf("Cannot bind `%s': %v", cfg.Port, err)
 	}
 }
