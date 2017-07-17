@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/base64"
+	"flag"
+	"fmt"
+	"github.com/BurntSushi/toml"
 	"github.com/jtblin/go-ldap-client"
 	"golang.org/x/net/webdav"
 	"log"
@@ -14,20 +17,41 @@ import (
 	"syscall"
 )
 
-const (
-	logLevelNone = "none"
-	logLevelAll  = "all"
-	envPrefix    = "PREFIX"
-	envLoglevel  = "LOGLEVEL"
-	pathRoot     = "./"
-	pathLog      = "/dev/stderr"
-)
+// configuration is via TOML
+var cfg struct {
+	Port             string
+	Root             string // serve webdav from here
+	Prefix           string // prefix to strip from URL path
+	LogFile          string
+	LogLevel         int // 0 (none) or 1 (errors) or 2 (all)
+	LdapBase         string
+	LdapHost         string
+	LdapPort         int
+	LdapUseSSL       bool
+	LdapBindDN       string
+	LdapBindPassword string
+	LdapUserFilter   string
+	LdapGroupFilter  string
+	LdapAttributes   []string
+}
+
+func readConfig() {
+	configfile := flag.String("cf", "/etc/go-webdavd.toml", "TOML config file")
+	flag.Parse()
+	if _, err := os.Stat(*configfile); err != nil {
+		log.Printf("Config file `%s' is inaccessible: %v", *configfile, err)
+	}
+
+	if _, err := toml.DecodeFile(*configfile, &cfg); err != nil {
+		log.Printf("Config file `%s' failed to parse: %v", *configfile, err)
+	}
+}
 
 func logger() func(*http.Request, error) {
-	switch os.Getenv(envLoglevel) {
-	case logLevelNone:
+	switch cfg.LogLevel {
+	case 0:
 		return nil
-	case logLevelAll:
+	case 2:
 		return func(r *http.Request, err error) {
 			log.Printf("REQUEST %s %s length:%d %s %s\n", r.Method, r.URL,
 				r.ContentLength, r.RemoteAddr, r.UserAgent())
@@ -41,12 +65,14 @@ func logger() func(*http.Request, error) {
 	}
 }
 
-func filesystem() webdav.FileSystem {
-	if err := os.Mkdir(pathRoot, os.ModePerm); !os.IsExist(err) {
-		log.Fatalf("FATAL %v", err)
+func filesystem(username string) webdav.FileSystem {
+	dir := fmt.Sprintf(cfg.Root, username)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		log.Printf("FS for user `%s' at `%s' does not exist: %v", username, dir, err)
+		return nil
 	}
-	log.Printf("INFO using local filesystem at %s\n", pathRoot)
-	return webdav.Dir(pathRoot)
+	log.Printf("using local filesystem at %s\n", dir)
+	return webdav.Dir(dir)
 }
 
 func hasFsPerms(username string) bool {
@@ -124,61 +150,67 @@ func basicAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	return pair[0], pair[1], true
 }
 
-func isAuth(w http.ResponseWriter, r *http.Request) bool {
+func isAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
 	u, p, ok := basicAuth(w, r)
 	if ok == false {
-		return false
+		return "", false
 	}
 
 	if isLdap(u, p) == false {
-		return false
+		return "", false
 	}
 
 	log.Printf("user %s logged in", u)
-	return true
+	return u, true
 }
 
 /* goroutines mux M:N to pthreads, so lock to one pthread to keep
    the setfsuid perms only to this goroutine
    https://github.com/golang/go/issues/1435
+      describes the issue
    https://github.com/golang/go/issues/20395
+      in go1.10 runtime.ThreadExit() should arrive
 */
-func router(h *webdav.Handler) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if isAuth(w, r) == false {
-			return http.Error(w, "Not authorized", 401)
-		}
-
-		runtime.LockOSThread()
-		defer runtime.ThreadExit()
-
-		if hasFsPerms(u) == false {
-			return http.Error(w, "FS error", 500)
-		}
-
-		h.ServeHTTP(w, r)
+func router(w http.ResponseWriter, r *http.Request) {
+	username, ok := isAuth(w, r)
+	if ok == false {
+		http.Error(w, "Not authorized", 401)
+		return
 	}
-}
 
-func main() {
-	logFile, err := os.OpenFile(pathLog, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("FATAL %v", err)
+	log.Printf("locking thread...")
+	runtime.LockOSThread()
+
+	log.Printf("setting FS perms...")
+	if hasFsPerms(username) == false {
+		http.Error(w, "FS error", 500)
+		return
 	}
-	defer logFile.Close()
-	log.SetOutput(logFile)
+	log.Printf("serving webdav for %s", username)
 
-	log.Printf("stripping url prefix = '%s'\n", os.Getenv(envPrefix))
-	h := &webdav.Handler{
-		Prefix:     os.Getenv(envPrefix),
-		FileSystem: filesystem(),
+	h := webdav.Handler{
+		Prefix:     cfg.Prefix,
+		FileSystem: filesystem(username),
 		LockSystem: webdav.NewMemLS(),
 		Logger:     logger(),
 	}
 
-	http.HandleFunc("/", router(h))
+	h.ServeHTTP(w, r)
+}
 
-	if err := http.ListenAndServe("127.0.0.1:8080", nil); err != nil {
+func main() {
+	readConfig()
+	log.Printf("go-webdav starting up...")
+
+	logFile, err := os.OpenFile(cfg.LogFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0640)
+	if err != nil {
+		log.Printf("Open logfile `%s' failed: %v", cfg.LogFile, err)
+	}
+	defer logFile.Close()
+	log.SetOutput(logFile)
+
+	http.HandleFunc("/", router)
+	if err := http.ListenAndServe(cfg.Port, nil); err != nil {
 		log.Fatalf("Cannot bind: %v", err)
 	}
 }
