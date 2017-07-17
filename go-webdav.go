@@ -35,6 +35,8 @@ var cfg struct {
 	LdapAttributes   []string
 }
 
+var webdavLockSystem = webdav.NewMemLS()
+
 func readConfig() {
 	configfile := flag.String("cf", "/etc/go-webdavd.toml", "TOML config file")
 	flag.Parse()
@@ -102,30 +104,39 @@ func hasFsPerms(username string) bool {
 
 func isLdap(username, pw string) bool {
 	log.Printf("user %s ldap start", username)
-	client := &ldap.LDAPClient{
-		Base:   "dc=ofs,dc=edu,dc=sg",
-		Host:   "ldap.ofs.edu.sg",
-		Port:   389,
-		UseSSL: false,
-		//BindDN:       "uid=readonlysuer,ou=people,dc=ofs,dc=edu,dc=sg",
-		//BindPassword: "readonlypassword",
-		UserFilter:  "(uid=%s)",
-		GroupFilter: "(memberUid=%s)",
-		Attributes:  []string{"givenName", "sn", "mail", "uid"},
+	client := ldap.LDAPClient{
+		Base:       cfg.LdapBase,
+		Host:       cfg.LdapHost,
+		Port:       cfg.LdapPort,
+		UserFilter: cfg.LdapUserFilter,
 	}
-	// It is the responsibility of the caller to close the connection
+	if cfg.LdapGroupFilter != "" {
+		client.GroupFilter = cfg.LdapGroupFilter
+	}
+	if cfg.LdapUseSSL != false {
+		client.UseSSL = cfg.LdapUseSSL
+	}
+	if cfg.LdapBindDN != "" {
+		client.BindDN = cfg.LdapBindDN
+	}
+	if cfg.LdapBindPassword != "" {
+		client.BindPassword = cfg.LdapBindPassword
+	}
+	if cfg.LdapAttributes != nil {
+		client.Attributes = cfg.LdapAttributes
+	}
 	defer client.Close()
 
 	ok, _, err := client.Authenticate(username, pw)
 	if err != nil {
-		log.Printf("Error authenticating user %s: %+v", username, err)
+		log.Printf("ldap error authenticating user `%s': %+v", username, err)
 		return false
 	}
 	if !ok {
-		log.Printf("Authentication failed for user %s", username)
+		log.Printf("ldap auth failed for user `%s'", username)
 		return false
 	}
-	log.Printf("ldap auth success for user: %+v", username)
+	log.Printf("ldap auth success for user: `%s'", username)
 
 	return true
 }
@@ -178,20 +189,17 @@ func router(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("locking thread...")
 	runtime.LockOSThread()
 
-	log.Printf("setting FS perms...")
 	if hasFsPerms(username) == false {
 		http.Error(w, "FS error", 500)
 		return
 	}
-	log.Printf("serving webdav for %s", username)
 
 	h := webdav.Handler{
 		Prefix:     cfg.Prefix,
+		LockSystem: webdavLockSystem,
 		FileSystem: filesystem(username),
-		LockSystem: webdav.NewMemLS(),
 		Logger:     logger(),
 	}
 
