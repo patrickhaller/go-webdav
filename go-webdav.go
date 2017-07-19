@@ -27,12 +27,14 @@ var cfg struct {
 	LdapBase         string
 	LdapHost         string
 	LdapPort         int
-	LdapUseSSL       bool
 	LdapBindDN       string
 	LdapBindPassword string
 	LdapUserFilter   string
 	LdapGroupFilter  string
 	LdapAttributes   []string
+	LdapSkipTLS      bool
+	LdapUseSSL       bool
+	LdapServerName   string
 }
 
 var webdavLockSystem = webdav.NewMemLS()
@@ -126,6 +128,10 @@ func isLdap(username, pw string) bool {
 	}
 	if cfg.LdapUseSSL != false {
 		client.UseSSL = cfg.LdapUseSSL
+		client.ServerName = cfg.LdapServerName
+	}
+	if cfg.LdapSkipTLS != false {
+		client.SkipTLS = cfg.LdapSkipTLS
 	}
 	if cfg.LdapBindDN != "" {
 		client.BindDN = cfg.LdapBindDN
