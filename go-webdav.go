@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/jtblin/go-ldap-client"
+	"github.com/patrickhaller/slog"
 	"golang.org/x/net/webdav"
-	"log"
 	"net/http"
 	"os"
 	"os/user"
@@ -23,7 +23,8 @@ var cfg struct {
 	Root             string // serve webdav from here
 	Prefix           string // prefix to strip from URL path
 	LogFile          string
-	LogLevel         int // 0 (none) or 1 (errors) or 2 (requests) or 3 (all)
+	AuditFile        string
+	Debug            bool
 	LdapBase         string
 	LdapHost         string
 	LdapPort         int
@@ -43,72 +44,55 @@ func readConfig() {
 	configfile := flag.String("cf", "/etc/go-webdavd.toml", "TOML config file")
 	flag.Parse()
 	if _, err := os.Stat(*configfile); err != nil {
-		log.Printf("Config file `%s' is inaccessible: %v", *configfile, err)
+		slog.P("Config file `%s' is inaccessible: %v", *configfile, err)
 	}
 
 	if _, err := toml.DecodeFile(*configfile, &cfg); err != nil {
-		log.Printf("Config file `%s' failed to parse: %v", *configfile, err)
-	}
-}
-
-func debug(f string, a ...interface{}) {
-	if cfg.LogLevel >= 3 {
-		log.Printf(f, a...)
+		slog.P("Config file `%s' failed to parse: %v", *configfile, err)
 	}
 }
 
 func logRequest(username string) func(*http.Request, error) {
-	switch cfg.LogLevel {
-	case 3:
-		fallthrough
-	case 2:
-		return func(r *http.Request, err error) {
-			log.Printf("REQUEST %s %s %s length:%d %s %s\n", username, r.Method, r.URL,
-				r.ContentLength, r.RemoteAddr, r.UserAgent())
-			if err != nil {
-				log.Printf("ERROR %s %s %s %v\n", username, r.Method, r.URL, err)
-			}
+	return func(r *http.Request, err error) {
+		slog.A("REQUEST %s %s %s length:%d %s %s", username, r.Method, r.URL,
+			r.ContentLength, r.RemoteAddr, r.UserAgent())
+		if err != nil {
+			slog.P("ERROR %s %s %s %v", username, r.Method, r.URL, err)
 		}
-	case 1:
-		return func(r *http.Request, err error) {
-			if err != nil {
-				log.Printf("ERROR %s %s %s %v\n", username, r.Method, r.URL, err)
-			}
-		}
-	default:
-		return nil
 	}
 }
 
 func filesystem(username string) webdav.FileSystem {
 	dir := fmt.Sprintf(cfg.Root, username)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		log.Printf("FS for user `%s' at `%s' does not exist: %v", username, dir, err)
+		slog.P("FS for user `%s' at `%s' does not exist: %v", username, dir, err)
 		return nil
 	}
-	debug("using local filesystem at %s\n", dir)
+	slog.D("using local filesystem at %s\n", dir)
 	return webdav.Dir(dir)
 }
 
 func hasFsPerms(username string) bool {
 	u, err := user.Lookup(username)
 	if err != nil {
+		slog.P("failed uid lookup for user `%s': %v", username, err)
 		return false
 	}
 
 	uid, err := strconv.Atoi(u.Uid)
 	if err != nil {
+		slog.P("failed integer conversion for user `%s' uid `%s': %v", username, uid, err)
 		return false
 	}
-	debug("user %s has uid %d", username, uid)
+	slog.D("user %s has uid %d", username, uid)
 
 	if err := syscall.Setfsuid(uid); err != nil {
-		log.Printf("setfsuid failed for user '%s':  %v", username, err)
+		slog.P("setfsuid failed for user '%s':  %v", username, err)
 		return false
 	}
 
 	if err := syscall.Setfsgid(uid); err != nil {
-		log.Printf("setfsgid failed for user '%s': %v", username, err)
+		slog.P("setfsgid failed for user '%s': %v", username, err)
 		return false
 	}
 
@@ -116,7 +100,7 @@ func hasFsPerms(username string) bool {
 }
 
 func isLdap(username, pw string) bool {
-	debug("user %s ldap start", username)
+	slog.D("user %s ldap start", username)
 	client := ldap.LDAPClient{
 		Base:       cfg.LdapBase,
 		Host:       cfg.LdapHost,
@@ -146,14 +130,14 @@ func isLdap(username, pw string) bool {
 
 	ok, _, err := client.Authenticate(username, pw)
 	if err != nil {
-		log.Printf("ldap error authenticating user `%s': %+v", username, err)
+		slog.P("ldap error authenticating user `%s': %+v", username, err)
 		return false
 	}
 	if !ok {
-		log.Printf("ldap auth failed for user `%s'", username)
+		slog.P("ldap auth failed for user `%s'", username)
 		return false
 	}
-	debug("ldap auth success for user: `%s'", username)
+	slog.D("ldap auth success for user: `%s'", username)
 
 	return true
 }
@@ -163,16 +147,19 @@ func basicAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 
 	s := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
 	if len(s) != 2 {
+		slog.D("no basic auth?")
 		return "", "", false
 	}
 
 	b, err := base64.StdEncoding.DecodeString(s[1])
 	if err != nil {
+		slog.D("basic auth b64 bad encoding: %v", err)
 		return "", "", false
 	}
 
 	pair := strings.SplitN(string(b), ":", 2)
 	if len(pair) != 2 {
+		slog.D("basic auth malformed? needs username:passwd")
 		return "", "", false
 	}
 	return pair[0], pair[1], true
@@ -188,7 +175,7 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 
-	debug("user %s logged in", u)
+	slog.D("user %s logged in", u)
 	return u, true
 }
 
@@ -225,17 +212,16 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	readConfig()
-	log.Printf("go-webdav starting up...")
-
-	logFile, err := os.OpenFile(cfg.LogFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0640)
-	if err != nil {
-		log.Printf("Open logfile `%s' failed: %v", cfg.LogFile, err)
-	}
-	defer logFile.Close()
-	log.SetOutput(logFile)
+	slog.Init(slog.Config{
+		File:      cfg.LogFile,
+		Debug:     cfg.Debug,
+		AuditFile: cfg.AuditFile,
+		Prefix:    "WBDV",
+	})
+	slog.D("go-webdav starting up...")
 
 	http.HandleFunc("/", router)
 	if err := http.ListenAndServe(cfg.Port, nil); err != nil {
-		log.Fatalf("Cannot bind `%s': %v", cfg.Port, err)
+		slog.P("Cannot bind `%s': %v", cfg.Port, err)
 	}
 }
