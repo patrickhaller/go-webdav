@@ -1,0 +1,11 @@
+[Unit]
+Description=DAV
+After=syslog.target network.target remote-fs.target nss-lookup.target
+
+[Service]
+Type=simple
+WorkingDirectory=/tmp
+ExecStart=/usr/local/bin/go-webdav -cf /usr/local/etc/webdav.toml
+
+[Install]
+WantedBy=multi-user.target
