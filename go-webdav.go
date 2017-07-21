@@ -57,7 +57,8 @@ func logRequest(username string) func(*http.Request, error) {
 		slog.A("REQUEST %s %s %s length:%d %s %s", username, r.Method, r.URL,
 			r.ContentLength, r.RemoteAddr, r.UserAgent())
 		if err != nil {
-			slog.P("ERROR %s %s %s %v", username, r.Method, r.URL, err)
+			slog.A("ERROR %s %s %s length:%d %s %s %v", username, r.Method, r.URL,
+				r.ContentLength, r.RemoteAddr, r.UserAgent(), err)
 		}
 	}
 }
