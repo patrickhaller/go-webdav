@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/jtblin/go-ldap-client"
+	"github.com/patrickhaller/confix"
 	"github.com/patrickhaller/slog"
 	"golang.org/x/net/webdav"
 	"net/http"
@@ -102,31 +103,8 @@ func hasFsPerms(username string) bool {
 
 func isLdap(username, pw string) bool {
 	slog.D("user %s ldap start", username)
-	client := ldap.LDAPClient{
-		Base:       cfg.LdapBase,
-		Host:       cfg.LdapHost,
-		Port:       cfg.LdapPort,
-		UserFilter: cfg.LdapUserFilter,
-	}
-	if cfg.LdapGroupFilter != "" {
-		client.GroupFilter = cfg.LdapGroupFilter
-	}
-	if cfg.LdapUseSSL != false {
-		client.UseSSL = cfg.LdapUseSSL
-		client.ServerName = cfg.LdapServerName
-	}
-	if cfg.LdapSkipTLS != false {
-		client.SkipTLS = cfg.LdapSkipTLS
-	}
-	if cfg.LdapBindDN != "" {
-		client.BindDN = cfg.LdapBindDN
-	}
-	if cfg.LdapBindPassword != "" {
-		client.BindPassword = cfg.LdapBindPassword
-	}
-	if cfg.LdapAttributes != nil {
-		client.Attributes = cfg.LdapAttributes
-	}
+	client := ldap.LDAPClient{}
+	confix.Confix("Ldap", &cfg, &client)
 	defer client.Close()
 
 	ok, _, err := client.Authenticate(username, pw)
