@@ -55,9 +55,10 @@ func readConfig() {
 
 func logRequest(username string) func(*http.Request, error) {
 	return func(r *http.Request, err error) {
-		slog.A("REQUEST %s %s %s length:%d %s %s", username, r.Method, r.URL,
-			r.ContentLength, r.RemoteAddr, r.UserAgent())
-		if err != nil {
+		if err == nil {
+			slog.A("REQUEST %s %s %s length:%d %s %s", username, r.Method, r.URL,
+				r.ContentLength, r.RemoteAddr, r.UserAgent())
+		} else {
 			slog.A("ERROR %s %s %s length:%d %s %s %v", username, r.Method, r.URL,
 				r.ContentLength, r.RemoteAddr, r.UserAgent(), err)
 		}
@@ -104,7 +105,10 @@ func hasFsPerms(username string) bool {
 func isLdap(username, pw string) bool {
 	slog.D("user %s ldap start", username)
 	client := ldap.LDAPClient{}
-	confix.Confix("Ldap", &cfg, &client)
+	if err := confix.Confix("Ldap", &cfg, &client); err != nil {
+		slog.P("confix failed: `%v'", err)
+		return false
+	}
 	defer client.Close()
 
 	ok, _, err := client.Authenticate(username, pw)
