@@ -20,23 +20,24 @@ import (
 
 // configuration is via TOML
 var cfg struct {
-	Port             string
-	Root             string // serve webdav from here
-	Prefix           string // prefix to strip from URL path
-	LogFile          string
-	AuditFile        string
-	Debug            bool
-	LdapBase         string
-	LdapHost         string
-	LdapPort         int
-	LdapBindDN       string
-	LdapBindPassword string
-	LdapUserFilter   string
-	LdapGroupFilter  string
-	LdapAttributes   []string
-	LdapSkipTLS      bool
-	LdapUseSSL       bool
-	LdapServerName   string
+	Port                  string
+	Root                  string // serve webdav from here
+	Prefix                string // prefix to strip from URL path
+	LogFile               string
+	AuditFile             string
+	Debug                 bool
+	DecapitalizeUserNames bool
+	LdapBase              string
+	LdapHost              string
+	LdapPort              int
+	LdapBindDN            string
+	LdapBindPassword      string
+	LdapUserFilter        string
+	LdapGroupFilter       string
+	LdapAttributes        []string
+	LdapSkipTLS           bool
+	LdapUseSSL            bool
+	LdapServerName        string
 }
 
 var webdavLockSystem = webdav.NewMemLS()
@@ -152,6 +153,10 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
 	u, p, ok := basicAuth(w, r)
 	if ok == false {
 		return "", false
+	}
+
+	if cfg.DecapitalizeUserNames == true {
+		u = strings.ToLower(u)
 	}
 
 	if isLdap(u, p) == false {
