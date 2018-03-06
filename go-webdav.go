@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // configuration is via TOML
@@ -23,6 +24,7 @@ var cfg struct {
 	Port                  string
 	Root                  string // serve webdav from here
 	Prefix                string // prefix to strip from URL path
+	AuthFailWaitSeconds   int
 	LogFile               string
 	AuditFile             string
 	Debug                 bool
@@ -41,6 +43,7 @@ var cfg struct {
 }
 
 var webdavLockSystem = webdav.NewMemLS()
+var lastFail = make(map[string]time.Time)
 
 func readConfig() {
 	configfile := flag.String("cf", "/etc/go-webdavd.toml", "TOML config file")
@@ -159,7 +162,15 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
 		u = strings.ToLower(u)
 	}
 
+	if last, ok := lastFail[u]; ok {
+		if last.Add(time.Second * time.Duration(cfg.AuthFailWaitSeconds)).After(time.Now()) {
+			return "", false
+		}
+	}
+
 	if isLdap(u, p) == false {
+		slog.P("auth fail for `%s' from %s via %s, rate-limiting user", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+		lastFail[u] = time.Now()
 		return "", false
 	}
 
@@ -184,7 +195,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 	runtime.LockOSThread()
 
 	if hasFsPerms(username) == false {
-		http.Error(w, "FS error", 500)
+		http.Error(w, "FS error", 403)
 		return
 	}
 
