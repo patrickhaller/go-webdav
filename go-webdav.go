@@ -166,32 +166,39 @@ func rmOldLasts(lasts []time.Time) []time.Time {
 	return liveLasts
 }
 
-func isAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
+func hasTooManyPasswdAttempts(username string) bool {
+	if lasts, ok := lastFail[username]; ok {
+		liveLasts := rmOldLasts(lasts)
+		lastFail[username] = liveLasts
+		if len(liveLasts) > cfg.AuthFailMaxCount {
+			return true
+		}
+	}
+	return false
+}
+
+func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 	u, p, ok := basicAuth(w, r)
 	if ok == false {
-		return "", false
+		return "", fmt.Errorf("Mal-formed basic auth")
 	}
 
 	if cfg.DecapitalizeUserNames == true {
 		u = strings.ToLower(u)
 	}
 
-	if lasts, ok := lastFail[u]; ok {
-		liveLasts := rmOldLasts(lasts)
-		lastFail[u] = liveLasts
-		if len(liveLasts) > cfg.AuthFailMaxCount {
-			return "", false
-		}
+	if hasTooManyPasswdAttempts(u) == true {
+		return "", fmt.Errorf("Too many authentication attempts, try back in %d seconds", cfg.AuthFailWindowSeconds)
 	}
 
 	if isLdap(u, p) == false {
 		slog.P("auth fail for `%s' from %s via %s, rate-limiting user", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
 		lastFail[u] = append(lastFail[u], time.Now())
-		return "", false
+		return "", fmt.Errorf("Authentication failed for `%s'", u)
 	}
 
 	slog.D("user %s logged in", u)
-	return u, true
+	return u, nil
 }
 
 /* goroutines mux M:N to pthreads, so lock to one pthread to keep
@@ -202,9 +209,9 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
       in go1.10 runtime.ThreadExit() should arrive
 */
 func router(w http.ResponseWriter, r *http.Request) {
-	username, ok := isAuth(w, r)
-	if ok == false {
-		http.Error(w, "Not authorized", 401)
+	username, err := isAuth(w, r)
+	if err != nil {
+		http.Error(w, err.Error(), 401)
 		return
 	}
 
