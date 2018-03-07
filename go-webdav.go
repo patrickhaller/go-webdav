@@ -24,7 +24,8 @@ var cfg struct {
 	Port                  string
 	Root                  string // serve webdav from here
 	Prefix                string // prefix to strip from URL path
-	AuthFailWaitSeconds   int
+	AuthFailWindowSeconds int
+	AuthFailMaxCount      int
 	LogFile               string
 	AuditFile             string
 	Debug                 bool
@@ -43,7 +44,7 @@ var cfg struct {
 }
 
 var webdavLockSystem = webdav.NewMemLS()
-var lastFail = make(map[string]time.Time)
+var lastFail = make(map[string][]time.Time)
 
 func readConfig() {
 	configfile := flag.String("cf", "/etc/go-webdavd.toml", "TOML config file")
@@ -152,6 +153,19 @@ func basicAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	return pair[0], pair[1], true
 }
 
+func rmOldLasts(lasts []time.Time) []time.Time {
+	var liveLasts []time.Time
+	failWindow := time.Second * time.Duration(cfg.AuthFailWindowSeconds)
+	now := time.Now()
+
+	for i := range lasts {
+		if lasts[i].Add(failWindow).After(now) {
+			liveLasts = append(liveLasts, lasts[i])
+		}
+	}
+	return liveLasts
+}
+
 func isAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
 	u, p, ok := basicAuth(w, r)
 	if ok == false {
@@ -162,15 +176,17 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
 		u = strings.ToLower(u)
 	}
 
-	if last, ok := lastFail[u]; ok {
-		if last.Add(time.Second * time.Duration(cfg.AuthFailWaitSeconds)).After(time.Now()) {
+	if lasts, ok := lastFail[u]; ok {
+		liveLasts := rmOldLasts(lasts)
+		lastFail[u] = liveLasts
+		if len(liveLasts) > cfg.AuthFailMaxCount {
 			return "", false
 		}
 	}
 
 	if isLdap(u, p) == false {
 		slog.P("auth fail for `%s' from %s via %s, rate-limiting user", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
-		lastFail[u] = time.Now()
+		lastFail[u] = append(lastFail[u], time.Now())
 		return "", false
 	}
 
