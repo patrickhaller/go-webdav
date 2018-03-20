@@ -61,11 +61,11 @@ func readConfig() {
 func logRequest(username string) func(*http.Request, error) {
 	return func(r *http.Request, err error) {
 		if err == nil {
-			slog.A("REQUEST %s %s %s length:%d %s %s", username, r.Method, r.URL,
-				r.ContentLength, r.RemoteAddr, r.UserAgent())
+			slog.A("REQUEST %s %s %s length:%d %s via %s %s", username, r.Method, r.URL,
+				r.ContentLength, r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.UserAgent())
 		} else {
-			slog.A("ERROR %s %s %s length:%d %s %s %v", username, r.Method, r.URL,
-				r.ContentLength, r.RemoteAddr, r.UserAgent(), err)
+			slog.A("ERROR %s %s %s length:%d %s via %s %s %v", username, r.Method, r.URL,
+				r.ContentLength, r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.UserAgent(), err)
 		}
 	}
 }
