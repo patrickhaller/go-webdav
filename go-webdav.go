@@ -171,6 +171,9 @@ func hasTooManyPasswdAttempts(username string) bool {
 		liveLasts := rmOldLasts(lasts)
 		lastFail[username] = liveLasts
 		if len(liveLasts) > cfg.AuthFailMaxCount {
+			if len(liveLasts)%10 == 1 {
+				slog.P("auth too many fails for `%s' with %d attempts", username, len(liveLasts))
+			}
 			return true
 		}
 	}
@@ -180,6 +183,7 @@ func hasTooManyPasswdAttempts(username string) bool {
 func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 	u, p, ok := basicAuth(w, r)
 	if ok == false {
+		slog.P("auth basic-auth fail from %s via %s", r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
 		return "", fmt.Errorf("Mal-formed basic auth")
 	}
 
@@ -192,7 +196,7 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 	}
 
 	if isLdap(u, p) == false {
-		slog.P("auth fail for `%s' from %s via %s, rate-limiting user", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+		slog.P("auth fail for `%s' from %s via %s", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
 		lastFail[u] = append(lastFail[u], time.Now())
 		return "", fmt.Errorf("Authentication failed for `%s'", u)
 	}
@@ -211,6 +215,7 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 func router(w http.ResponseWriter, r *http.Request) {
 	username, err := isAuth(w, r)
 	if err != nil {
+		webdav.RequestCloser(r, 401, err)
 		http.Error(w, err.Error(), 401)
 		return
 	}
@@ -218,6 +223,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 	runtime.LockOSThread()
 
 	if hasFsPerms(username) == false {
+		webdav.RequestCloser(r, 403, nil)
 		http.Error(w, "FS error", 403)
 		return
 	}
