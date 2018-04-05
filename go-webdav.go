@@ -183,7 +183,6 @@ func hasTooManyPasswdAttempts(username string) bool {
 func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 	u, p, ok := basicAuth(w, r)
 	if ok == false {
-		slog.P("auth basic-auth fail from %s via %s", r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
 		return "", fmt.Errorf("Mal-formed basic auth")
 	}
 
