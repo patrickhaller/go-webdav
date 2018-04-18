@@ -1,0 +1,21 @@
+# example config for:
+# hiding behind nginx (https://school.edu/webdav/)
+# with users home-dirs in /Users/
+Port  = "127.0.0.1:8080"
+Root  = "/Users/%s"
+Prefix  = "/webdav"
+LogFile = "STDERR"
+AuditFile = "/var/log/webdav.log"
+Debug = false
+LdapBase = "dc=school,dc=edu"
+LdapHost = "ldap.school.edu"
+LdapPort        = 389
+LdapSkipTLS       = true
+LdapBindDN       = ""
+LdapBindPassword  = ""
+LdapUserFilter   = "(uid=%s)"
+LdapGroupFilter   =  "(memberUid=%s)"
+LdapAttributes  =  [ "givenName", "sn", "mail", "uid" ]
+DecapitalizeUserNames = true
+AuthFailWindowSeconds = 300
+AuthFailMaxCount = 100
