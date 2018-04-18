@@ -1,13 +1,9 @@
-include ~/pkg/make/Makefile.golang
-host := webdav.ofs.edu.sg
+host := webdav.$(shell hostname --domain)
 name := go-webdav
 
 restart:
 	ssh $(host) systemctl stop $(name) || true
 	scp ~/var/go/bin/$(name) $(host):/usr/local/bin/.
 	ssh $(host) systemctl start $(name)
-#
-#setup:
-#	ssh $(host) mkdir /opt/$(name) || true
-#	scp $(name).service $(host):/etc/systemd/system/.
-#	ssh $(host) systemctl enable $(name)
+
+include ~/pkg/make/Makefile.golang
