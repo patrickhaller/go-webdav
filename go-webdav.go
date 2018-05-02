@@ -4,11 +4,7 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
-	"github.com/BurntSushi/toml"
-	"github.com/jtblin/go-ldap-client"
-	"github.com/patrickhaller/confix"
-	"github.com/patrickhaller/slog"
-	"golang.org/x/net/webdav"
+	"io"
 	"net/http"
 	"os"
 	"os/user"
@@ -17,6 +13,12 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/BurntSushi/toml"
+	"github.com/jtblin/go-ldap-client"
+	"github.com/patrickhaller/confix"
+	"github.com/patrickhaller/slog"
+	"golang.org/x/net/webdav"
 )
 
 // configuration is via TOML
@@ -64,6 +66,12 @@ func logRequest(username string) func(*http.Request, error) {
 			slog.A("REQUEST %s %s %s length:%d %s via %s %s", username, r.Method, r.URL,
 				r.ContentLength, r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.UserAgent())
 		} else {
+			// dump the request body to be nice for any downstream proxies
+			devnull, err2 := os.OpenFile("/dev/null", os.O_WRONLY, 0666)
+			if err2 != nil {
+				_, _ = io.Copy(devnull, r.Body)
+				devnull.Close()
+			}
 			slog.A("ERROR %s %s %s length:%d %s via %s %s %v", username, r.Method, r.URL,
 				r.ContentLength, r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.UserAgent(), err)
 		}
@@ -214,7 +222,6 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 func router(w http.ResponseWriter, r *http.Request) {
 	username, err := isAuth(w, r)
 	if err != nil {
-		webdav.RequestCloser(r, 401, err)
 		http.Error(w, err.Error(), 401)
 		return
 	}
@@ -222,7 +229,6 @@ func router(w http.ResponseWriter, r *http.Request) {
 	runtime.LockOSThread()
 
 	if hasFsPerms(username) == false {
-		webdav.RequestCloser(r, 403, nil)
 		http.Error(w, "FS error", 403)
 		return
 	}
