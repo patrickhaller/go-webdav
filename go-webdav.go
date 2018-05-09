@@ -62,18 +62,21 @@ func readConfig() {
 
 func logRequest(username string) func(*http.Request, error) {
 	return func(r *http.Request, err error) {
+		base := fmt.Sprintf("%s %s %s length:%d %s via %s %s", username, r.Method, r.URL,
+			r.ContentLength, r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.UserAgent())
 		if err == nil {
-			slog.A("REQUEST %s %s %s length:%d %s via %s %s", username, r.Method, r.URL,
-				r.ContentLength, r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.UserAgent())
+			slog.A("REQUEST %s", base)
+			return
+		}
+		slog.A("ERROR %s %v", base, err)
+
+		// dump the request body to be nice for any downstream proxies
+		devnull, err := os.OpenFile("/dev/null", os.O_WRONLY, 0666)
+		if err != nil {
+			slog.P("error opening /dev/null %v", err)
 		} else {
-			// dump the request body to be nice for any downstream proxies
-			devnull, err2 := os.OpenFile("/dev/null", os.O_WRONLY, 0666)
-			if err2 != nil {
-				_, _ = io.Copy(devnull, r.Body)
-				devnull.Close()
-			}
-			slog.A("ERROR %s %s %s length:%d %s via %s %s %v", username, r.Method, r.URL,
-				r.ContentLength, r.RemoteAddr, r.Header.Get("X-Forwarded-For"), r.UserAgent(), err)
+			_, _ = io.Copy(devnull, r.Body)
+			devnull.Close()
 		}
 	}
 }
