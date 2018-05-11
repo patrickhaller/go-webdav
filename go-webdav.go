@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/user"
@@ -69,15 +68,6 @@ func logRequest(username string) func(*http.Request, error) {
 			return
 		}
 		slog.A("ERROR %s %v", base, err)
-
-		// dump the request body to be nice for any downstream proxies
-		devnull, err := os.OpenFile("/dev/null", os.O_WRONLY, 0666)
-		if err != nil {
-			slog.P("error opening /dev/null %v", err)
-		} else {
-			_, _ = io.Copy(devnull, r.Body)
-			devnull.Close()
-		}
 	}
 }
 
