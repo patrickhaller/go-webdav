@@ -171,8 +171,9 @@ func hasTooManyPasswdAttempts(username string) bool {
 	if lasts, ok := lastFail[username]; ok {
 		liveLasts := rmOldLasts(lasts)
 		lastFail[username] = liveLasts
+		lastFail[username] = append(lastFail[username], time.Now())
 		if len(liveLasts) > cfg.AuthFailMaxCount {
-			if len(liveLasts)%10 == 1 {
+			if len(liveLasts)%1000 == 1 {
 				slog.P("auth too many fails for `%s' with %d attempts", username, len(liveLasts))
 			}
 			return true
