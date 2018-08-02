@@ -197,7 +197,7 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 	}
 
 	if isLdap(u, p) == true {
-		slog.P("user %s logged in", u)
+		slog.D("user %s logged in", u)
 		return u, nil
 	}
 
