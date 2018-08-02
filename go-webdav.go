@@ -122,13 +122,13 @@ func isLdap(username, pw string) bool {
 		slog.P("ldap error authenticating user `%s': %+v", username, err)
 		return false
 	}
-	if !ok {
-		slog.P("ldap auth failed for user `%s'", username)
-		return false
+	if ok {
+		slog.D("ldap auth success for user: `%s'", username)
+		return true
 	}
-	slog.D("ldap auth success for user: `%s'", username)
 
-	return true
+	slog.P("ldap auth failed for user `%s'", username)
+	return false
 }
 
 func basicAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
@@ -196,14 +196,14 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 		return "", fmt.Errorf("Too many authentication attempts, try back in %d seconds", cfg.AuthFailWindowSeconds)
 	}
 
-	if isLdap(u, p) == false {
-		slog.P("auth fail for `%s' from %s via %s", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
-		lastFail[u] = append(lastFail[u], time.Now())
-		return "", fmt.Errorf("Authentication failed for `%s'", u)
+	if isLdap(u, p) == true {
+		slog.P("user %s logged in", u)
+		return u, nil
 	}
 
-	slog.D("user %s logged in", u)
-	return u, nil
+	slog.P("auth fail for `%s' from %s via %s", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+	lastFail[u] = append(lastFail[u], time.Now())
+	return "", fmt.Errorf("Authentication failed for `%s'", u)
 }
 
 /* goroutines mux M:N to pthreads, so lock to one pthread to keep
