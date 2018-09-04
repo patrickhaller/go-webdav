@@ -188,6 +188,10 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 		return "", fmt.Errorf("Mal-formed basic auth")
 	}
 
+	if u == "" || p == "" {
+		return "", fmt.Errorf("Mal-formed userid or password")
+	}
+
 	if cfg.DecapitalizeUserNames == true {
 		u = strings.ToLower(u)
 	}
@@ -197,7 +201,7 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 	}
 
 	if isLdap(u, p) == true {
-		slog.D("user %s logged in", u)
+		slog.D("user `%s' logged in from %s via %s", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
 		return u, nil
 	}
 
