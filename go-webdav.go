@@ -27,6 +27,7 @@ var cfg struct {
 	Prefix                string // prefix to strip from URL path
 	AuthFailWindowSeconds int
 	AuthFailMaxCount      int
+	AuthFailLogPer        int // log too many auth fails every Nth fail
 	LogFile               string
 	AuditFile             string
 	Debug                 bool
@@ -173,7 +174,7 @@ func hasTooManyPasswdAttempts(username string) bool {
 		lastFail[username] = liveLasts
 		lastFail[username] = append(lastFail[username], time.Now())
 		if len(liveLasts) > cfg.AuthFailMaxCount {
-			if len(liveLasts)%1000 == 1 {
+			if len(liveLasts)%cfg.AuthFailLogPer == 1 {
 				slog.P("auth too many fails for `%s' with %d attempts", username, len(liveLasts))
 			}
 			return true
