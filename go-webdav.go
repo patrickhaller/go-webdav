@@ -186,10 +186,12 @@ func hasTooManyPasswdAttempts(username string) bool {
 func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 	u, p, ok := basicAuth(w, r)
 	if ok == false {
+		w.Header().Set(`X-Auth-Error`, fmt.Sprintf(`Mal-formed basic auth`))
 		return "", fmt.Errorf("Mal-formed basic auth")
 	}
 
 	if u == "" || p == "" {
+		w.Header().Set(`X-Auth-Error`, fmt.Sprintf(`Mal-formed userid or password`))
 		return "", fmt.Errorf("Mal-formed userid or password")
 	}
 
@@ -198,6 +200,8 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 	}
 
 	if hasTooManyPasswdAttempts(u) == true {
+		w.Header().Set(`X-Auth-Error`,
+			fmt.Sprintf(`Too many attempts, retry in %d seconds`, cfg.AuthFailWindowSeconds))
 		return "", fmt.Errorf("Too many authentication attempts, try back in %d seconds", cfg.AuthFailWindowSeconds)
 	}
 
