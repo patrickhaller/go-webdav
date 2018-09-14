@@ -1,9 +1,11 @@
-webdav written in go with features:
-	multiuser
-	ldap auth
-	standalone
+### Features
+webdav written in golang with the following features:
+   * Multiuser
+   * LDAP auth
+   * Standalone
 
 
+### References
 https://godoc.org/golang.org/x/net/webdav 
 
 https://github.com/vvekic/go-webdav 
