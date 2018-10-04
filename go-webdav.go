@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"os/user"
 	"runtime"
 	"strconv"
@@ -32,6 +33,7 @@ var cfg struct {
 	AuditFile             string
 	Debug                 bool
 	DecapitalizeUserNames bool
+	TrimUserNames         bool
 	LdapBase              string
 	LdapHost              string
 	LdapPort              int
@@ -195,6 +197,10 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 		return "", fmt.Errorf("Mal-formed userid or password")
 	}
 
+	if cfg.TrimUserNames == true {
+		u = strings.TrimSpace(u)
+	}
+
 	if cfg.DecapitalizeUserNames == true {
 		u = strings.ToLower(u)
 	}
@@ -255,6 +261,14 @@ func main() {
 		Prefix:    "WBDV",
 	})
 	slog.D("go-webdav starting up...")
+
+	sigh := make(chan os.Signal, 1)
+	signal.Notify(sigh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigh
+		slog.P("go-webdav received `%v', exiting...", sig)
+		os.Exit(1)
+	}()
 
 	http.HandleFunc("/", router)
 	if err := http.ListenAndServe(cfg.Port, nil); err != nil {
