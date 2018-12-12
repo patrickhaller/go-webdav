@@ -24,8 +24,9 @@ import (
 // configuration is via TOML
 var cfg struct {
 	Port                  string
-	Root                  string // serve webdav from here
-	Prefix                string // prefix to strip from URL path
+	Root                  string   // serve webdav from here
+	Roots                 []string // tho try first to serve webdav from here
+	Prefix                string   // prefix to strip from URL path
 	AuthFailWindowSeconds int
 	AuthFailMaxCount      int
 	AuthFailLogPer        int // log too many auth fails every Nth fail
@@ -75,6 +76,16 @@ func logRequest(username string) func(*http.Request, error) {
 }
 
 func filesystem(username string) webdav.FileSystem {
+	if len(cfg.Roots) != 0 {
+		for i := range cfg.Roots {
+			dir := fmt.Sprintf(cfg.Roots[i], username)
+			if _, err := os.Stat(dir); err == nil {
+				slog.D("using local filesystem at %s\n", dir)
+				return webdav.Dir(dir)
+			}
+		}
+	}
+
 	dir := fmt.Sprintf(cfg.Root, username)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		slog.P("FS for user `%s' at `%s' does not exist: %v", username, dir, err)
@@ -260,7 +271,7 @@ func main() {
 		AuditFile: cfg.AuditFile,
 		Prefix:    "WBDV",
 	})
-	slog.D("go-webdav starting up...")
+	slog.D("go-webdav starting up on %s...", cfg.Port)
 
 	sigh := make(chan os.Signal, 1)
 	signal.Notify(sigh, syscall.SIGINT, syscall.SIGTERM)
