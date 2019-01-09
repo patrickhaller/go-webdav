@@ -14,10 +14,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/BurntSushi/toml"
-	"github.com/jtblin/go-ldap-client"
 	"github.com/patrickhaller/confix"
+	"github.com/patrickhaller/go-ldap-client"
 	"github.com/patrickhaller/slog"
+	"github.com/patrickhaller/toml"
 	"golang.org/x/net/webdav"
 )
 
