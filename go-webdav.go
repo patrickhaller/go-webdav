@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,9 +28,10 @@ var cfg struct {
 	Root                  string   // serve webdav from here
 	Roots                 []string // tho try first to serve webdav from here
 	Prefix                string   // prefix to strip from URL path
-	AuthFailWindowSeconds int
+	AuthFailWindow        int      //seconds
 	AuthFailMaxCount      int
 	AuthFailLogPer        int // log too many auth fails every Nth fail
+	AuthClientsWindow     int // how long to keep record of clients
 	LogFile               string
 	AuditFile             string
 	Debug                 bool
@@ -49,7 +51,19 @@ var cfg struct {
 }
 
 var webdavLockSystem = webdav.NewMemLS()
-var lastFail = make(map[string][]time.Time)
+
+type client struct {
+	id   string
+	time time.Time
+}
+
+type last struct {
+	time time.Time
+}
+
+var lastFails = make(map[string][]last)
+var currentClients = make(map[string][]client)
+var okClients = make(map[string][]client)
 
 func readConfig() {
 	configfile := flag.String("cf", "/etc/go-webdavd.toml", "TOML config file")
@@ -124,14 +138,14 @@ func hasFsPerms(username string) bool {
 
 func isLdap(username, pw string) bool {
 	slog.D("user %s ldap start", username)
-	client := ldap.LDAPClient{}
-	if err := confix.Confix("Ldap", &cfg, &client); err != nil {
+	c := ldap.LDAPClient{}
+	if err := confix.Confix("Ldap", &cfg, &c); err != nil {
 		slog.P("confix failed: `%v'", err)
 		return false
 	}
-	defer client.Close()
+	defer c.Close()
 
-	ok, _, err := client.Authenticate(username, pw)
+	ok, _, err := c.Authenticate(username, pw)
 	if err != nil {
 		slog.P("ldap error authenticating user `%s': %+v", username, err)
 		return false
@@ -168,31 +182,77 @@ func basicAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	return pair[0], pair[1], true
 }
 
-func rmOldLasts(lasts []time.Time) []time.Time {
-	var liveLasts []time.Time
-	failWindow := time.Second * time.Duration(cfg.AuthFailWindowSeconds)
-	now := time.Now()
-
-	for i := range lasts {
-		if lasts[i].Add(failWindow).After(now) {
-			liveLasts = append(liveLasts, lasts[i])
-		}
+/*
+	Prevent DoS and botnet brute forcing
+	first from IP? allow ldap check
+*/
+func remoteID(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return "_" + r.Header.Get("X-Forwarded-For")
 	}
-	return liveLasts
+	return host + "_" + r.Header.Get("X-Forwarded-For")
 }
 
-func hasTooManyPasswdAttempts(username string) bool {
-	if lasts, ok := lastFail[username]; ok {
-		liveLasts := rmOldLasts(lasts)
-		lastFail[username] = liveLasts
-		lastFail[username] = append(lastFail[username], time.Now())
-		if len(liveLasts) > cfg.AuthFailMaxCount {
-			if len(liveLasts)%cfg.AuthFailLogPer == 1 {
-				slog.P("auth too many fails for `%s' with %d attempts", username, len(liveLasts))
-			}
+func isClient(clients []client, r *http.Request) bool {
+	rmt := remoteID(r)
+	for i := range clients {
+		if clients[i].id == rmt {
 			return true
 		}
 	}
+	return false
+}
+
+func rmOldClients(clients []client, windowSeconds int) []client {
+	var live []client
+	window := time.Second * time.Duration(windowSeconds)
+	now := time.Now()
+
+	for i := range clients {
+		if clients[i].time.Add(window).After(now) {
+			live = append(live, clients[i])
+		}
+	}
+	return live
+}
+
+func rmOldLasts(lasts []last, windowSeconds int) []last {
+	var live []last
+	window := time.Second * time.Duration(windowSeconds)
+	now := time.Now()
+
+	for i := range lasts {
+		if lasts[i].time.Add(window).After(now) {
+			live = append(live, lasts[i])
+		}
+	}
+	return live
+}
+
+func hasTooManyPasswdAttempts(username string, r *http.Request) bool {
+	ok := isClient(okClients[username], r)
+	okClients[username] = rmOldClients(okClients[username], cfg.AuthClientsWindow)
+	if ok {
+		okClients[username] = append(okClients[username], client{remoteID(r), time.Now()})
+		return false
+	}
+
+	clients := rmOldClients(currentClients[username], cfg.AuthClientsWindow)
+	if !isClient(clients, r) {
+		// allow one guess to prevent DoS
+		currentClients[username] = append(currentClients[username], client{remoteID(r), time.Now()})
+		return false
+	}
+
+	lasts := rmOldLasts(lastFails[username], cfg.AuthFailWindow)
+	if len(lasts) >= cfg.AuthFailMaxCount {
+		if len(lasts)%cfg.AuthFailLogPer == 1 {
+			slog.P("auth too many fails for `%s' with %d attempts", username, len(lasts))
+		}
+		return true
+	}
+	lastFails[username] = append(lasts, last{time.Now()})
 	return false
 }
 
@@ -216,19 +276,20 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 		u = strings.ToLower(u)
 	}
 
-	if hasTooManyPasswdAttempts(u) == true {
+	if hasTooManyPasswdAttempts(u, r) == true {
 		w.Header().Set(`X-Auth-Error`,
-			fmt.Sprintf(`Too many attempts, retry in %d seconds`, cfg.AuthFailWindowSeconds))
-		return "", fmt.Errorf("Too many authentication attempts, try back in %d seconds", cfg.AuthFailWindowSeconds)
+			fmt.Sprintf(`Too many attempts, retry in %d seconds`, cfg.AuthFailWindow))
+		return "", fmt.Errorf("Too many authentication attempts, try back in %d seconds", cfg.AuthFailWindow)
 	}
 
 	if isLdap(u, p) == true {
 		slog.D("user `%s' logged in from %s via %s", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+		okClients[u] = append(okClients[u], client{remoteID(r), time.Now()})
 		return u, nil
 	}
 
 	slog.P("auth fail for `%s' from %s via %s", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
-	lastFail[u] = append(lastFail[u], time.Now())
+	lastFails[u] = append(lastFails[u], last{time.Now()})
 	return "", fmt.Errorf("Authentication failed for `%s'", u)
 }
 
