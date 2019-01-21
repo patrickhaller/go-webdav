@@ -3,6 +3,7 @@ webdav written in golang with the following features:
    * Multiuser
    * LDAP auth
    * Standalone
+   * Anti-DoS and password brute-force client limiting
 
 
 ### References
