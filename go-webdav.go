@@ -182,10 +182,6 @@ func basicAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	return pair[0], pair[1], true
 }
 
-/*
-	Prevent DoS and botnet brute forcing
-	first from IP? allow ldap check
-*/
 func remoteID(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
