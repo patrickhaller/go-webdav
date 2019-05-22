@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/patrickhaller/slog"
 	"net/http"
 	"testing"
 	"time"
@@ -16,6 +17,12 @@ func TestAntiDos(t *testing.T) {
 	cfg.AuthFailWindow = 60
 	cfg.AuthFailMaxCount = 1
 	cfg.AuthFailLogPer = 1
+	slog.Init(slog.Config{
+		File:      "STDERR",
+		Debug:     true,
+		AuditFile: "STDERR",
+		Prefix:    "WBDV",
+	})
 
 	// first attempt
 	if hasTooManyPasswdAttempts(username, r) == true {

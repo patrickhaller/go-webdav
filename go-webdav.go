@@ -231,6 +231,7 @@ func hasTooManyPasswdAttempts(username string, r *http.Request) bool {
 	okClients[username] = rmOldClients(okClients[username], cfg.AuthClientsWindow)
 	if ok {
 		okClients[username] = append(okClients[username], client{remoteID(r), time.Now()})
+		slog.D("user `%s' has okClient with id `%s'", username, remoteID(r))
 		return false
 	}
 
@@ -238,17 +239,20 @@ func hasTooManyPasswdAttempts(username string, r *http.Request) bool {
 	if !isClient(clients, r) {
 		// allow one guess to prevent DoS
 		currentClients[username] = append(currentClients[username], client{remoteID(r), time.Now()})
+		slog.D("user `%s' with new client id first auth `%s'", username, remoteID(r))
 		return false
 	}
 
 	lasts := rmOldLasts(lastFails[username], cfg.AuthFailWindow)
 	if len(lasts) >= cfg.AuthFailMaxCount {
+		slog.D("user `%s' too many auth fails %d", username, len(lasts))
 		if len(lasts)%cfg.AuthFailLogPer == 1 {
 			slog.P("auth too many fails for `%s' with %d attempts", username, len(lasts))
 		}
 		return true
 	}
 	lastFails[username] = append(lasts, last{time.Now()})
+	slog.D("user `%s' does not have too many auth fails, count %d", username, len(lasts))
 	return false
 }
 
