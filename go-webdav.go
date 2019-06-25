@@ -57,11 +57,7 @@ type client struct {
 	time time.Time
 }
 
-type last struct {
-	time time.Time
-}
-
-var lastFails = make(map[string][]last)
+var lastFails = make(map[string][]client)
 var currentClients = make(map[string][]client)
 var okClients = make(map[string][]client)
 
@@ -213,19 +209,6 @@ func rmOldClients(clients []client, windowSeconds int) []client {
 	return live
 }
 
-func rmOldLasts(lasts []last, windowSeconds int) []last {
-	var live []last
-	window := time.Second * time.Duration(windowSeconds)
-	now := time.Now()
-
-	for i := range lasts {
-		if lasts[i].time.Add(window).After(now) {
-			live = append(live, lasts[i])
-		}
-	}
-	return live
-}
-
 func hasTooManyPasswdAttempts(username string, r *http.Request) bool {
 	ok := isClient(okClients[username], r)
 	okClients[username] = rmOldClients(okClients[username], cfg.AuthClientsWindow)
@@ -243,7 +226,7 @@ func hasTooManyPasswdAttempts(username string, r *http.Request) bool {
 		return false
 	}
 
-	lasts := rmOldLasts(lastFails[username], cfg.AuthFailWindow)
+	lasts := rmOldClients(lastFails[username], cfg.AuthFailWindow)
 	if len(lasts) >= cfg.AuthFailMaxCount {
 		slog.D("user `%s' too many auth fails %d", username, len(lasts))
 		if len(lasts)%cfg.AuthFailLogPer == 1 {
@@ -251,7 +234,7 @@ func hasTooManyPasswdAttempts(username string, r *http.Request) bool {
 		}
 		return true
 	}
-	lastFails[username] = append(lasts, last{time.Now()})
+	lastFails[username] = append(lasts, client{time: time.Now()})
 	slog.D("user `%s' does not have too many auth fails, count %d", username, len(lasts))
 	return false
 }
@@ -289,7 +272,7 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
 	}
 
 	slog.P("auth fail for `%s' from %s via %s", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
-	lastFails[u] = append(lastFails[u], last{time.Now()})
+	lastFails[u] = append(lastFails[u], client{time: time.Now()})
 	return "", fmt.Errorf("Authentication failed for `%s'", u)
 }
 

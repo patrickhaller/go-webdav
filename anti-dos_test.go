@@ -29,7 +29,7 @@ func TestAntiDos(t *testing.T) {
 		t.Error("blocked on first attempt")
 	}
 	// ... they provide wrong passwd
-	lastFails[username] = append(lastFails[username], last{time.Now()})
+	lastFails[username] = append(lastFails[username], client{time: time.Now()})
 
 	if len(lastFails[username]) == 0 {
 		t.Error("lastFails is still zero-length")
