@@ -57,9 +57,13 @@ type client struct {
 	time time.Time
 }
 
+/* DoS + brute force prevention =
+   keep track of login fails per user,
+   and which clients have auth'd ok,
+   and every client regardless */
 var lastFails = make(map[string][]client)
-var currentClients = make(map[string][]client)
 var okClients = make(map[string][]client)
+var allClients = make(map[string][]client)
 
 func readConfig() {
 	configfile := flag.String("cf", "/etc/go-webdavd.toml", "TOML config file")
@@ -218,10 +222,10 @@ func hasTooManyPasswdAttempts(username string, r *http.Request) bool {
 		return false
 	}
 
-	clients := rmOldClients(currentClients[username], cfg.AuthClientsWindow)
+	clients := rmOldClients(allClients[username], cfg.AuthClientsWindow)
 	if !isClient(clients, r) {
 		// allow one guess to prevent DoS
-		currentClients[username] = append(currentClients[username], client{remoteID(r), time.Now()})
+		allClients[username] = append(allClients[username], client{remoteID(r), time.Now()})
 		slog.D("user `%s' with new client id first auth `%s'", username, remoteID(r))
 		return false
 	}
