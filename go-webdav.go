@@ -215,14 +215,6 @@ func rmOldClients(clients []client, windowSeconds int) []client {
 
 func hasTooManyPasswdAttempts(username string, r *http.Request) bool {
 	okClients[username] = rmOldClients(okClients[username], cfg.AuthClientsWindow)
-	/*
-		ok := isClient(okClients[username], r)
-		if ok {
-			okClients[username] = append(okClients[username], client{remoteID(r), time.Now()})
-			slog.D("user `%s' has okClient with id `%s'", username, remoteID(r))
-			return false
-		}
-	*/
 
 	clients := rmOldClients(allClients[username], cfg.AuthClientsWindow)
 	if !isClient(clients, r) {
