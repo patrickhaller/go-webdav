@@ -35,8 +35,8 @@ func TestAntiDos(t *testing.T) {
 		t.Error("lastFails is still zero-length")
 	}
 
-	if len(currentClients[username]) == 0 {
-		t.Error("currentClients is still zero-length")
+	if len(allClients[username]) == 0 {
+		t.Error("allClients is still zero-length")
 	}
 
 	// second attempt
