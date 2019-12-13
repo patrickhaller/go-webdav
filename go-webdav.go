@@ -32,6 +32,7 @@ var cfg struct {
 	AuthFailMaxCount      int
 	AuthFailLogPer        int // log too many auth fails every Nth fail
 	AuthClientsWindow     int // how long to keep record of clients
+	AuthDenialIsDisabled  bool
 	LogFile               string
 	AuditFile             string
 	Debug                 bool
@@ -215,6 +216,10 @@ func rmOldClients(clients []client, windowSeconds int) []client {
 
 func hasTooManyPasswdAttempts(username string, r *http.Request) bool {
 	okClients[username] = rmOldClients(okClients[username], cfg.AuthClientsWindow)
+
+	if cfg.AuthDenialIsDisabled {
+		return false
+	}
 
 	clients := rmOldClients(allClients[username], cfg.AuthClientsWindow)
 	if !isClient(clients, r) {
