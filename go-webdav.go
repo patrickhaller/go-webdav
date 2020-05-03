@@ -318,7 +318,7 @@ func main() {
 		AuditFile: cfg.AuditFile,
 		Prefix:    "WBDV",
 	})
-	slog.D("go-webdav starting up on %s...", cfg.Port)
+	slog.P("go-webdav starting up on %s...", cfg.Port)
 
 	sigh := make(chan os.Signal, 1)
 	signal.Notify(sigh, syscall.SIGINT, syscall.SIGTERM)
