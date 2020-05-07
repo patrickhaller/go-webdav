@@ -328,6 +328,8 @@ func main() {
 		os.Exit(1)
 	}()
 
+	syscall.Umask(0002)
+
 	http.HandleFunc("/", router)
 	if err := http.ListenAndServe(cfg.Port, nil); err != nil {
 		slog.P("Cannot bind `%s': %v", cfg.Port, err)
