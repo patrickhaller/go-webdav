@@ -19,3 +19,5 @@ https://github.com/cetex/go-webdav-parallel
 https://github.com/gogits/webdav
 	ab initio implementation
 
+[gohalt](https://github.com/1pkg/gohalt) rate-limiting
+   
