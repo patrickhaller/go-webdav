@@ -8,14 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"os/user"
 	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/patrickhaller/confix"
 	"github.com/patrickhaller/go-ldap-client"
 	"github.com/patrickhaller/slog"
 	"github.com/patrickhaller/toml"
@@ -38,17 +36,7 @@ var cfg struct {
 	Debug                 bool
 	DecapitalizeUserNames bool
 	TrimUserNames         bool
-	LdapBase              string
-	LdapHost              string
-	LdapPort              int
-	LdapBindDN            string
-	LdapBindPassword      string
-	LdapUserFilter        string
-	LdapGroupFilter       string
-	LdapAttributes        []string
-	LdapSkipTLS           bool
-	LdapUseSSL            bool
-	LdapServerName        string
+	Ldap                  ldap.LDAPClient
 }
 
 var webdavLockSystem = webdav.NewMemLS()
@@ -75,6 +63,10 @@ func readConfig() {
 
 	if _, err := toml.DecodeFile(*configfile, &cfg); err != nil {
 		slog.P("Config file `%s' failed to parse: %v", *configfile, err)
+	}
+
+	if cfg.Ldap.Host == "" {
+		slog.F("Config file `%v' has no ldap host", *configfile)
 	}
 }
 
@@ -110,14 +102,9 @@ func filesystem(username string) webdav.FileSystem {
 	return webdav.Dir(dir)
 }
 
-func hasFsPerms(username string) bool {
-	u, err := user.Lookup(username)
-	if err != nil {
-		slog.P("failed uid lookup for user `%s': %v", username, err)
-		return false
-	}
+func hasFsPerms(username string, uids string) bool {
 
-	uid, err := strconv.Atoi(u.Uid)
+	uid, err := strconv.Atoi(uids)
 	if err != nil {
 		slog.P("failed integer conversion for user `%s' uid `%s': %v", username, uid, err)
 		return false
@@ -137,27 +124,24 @@ func hasFsPerms(username string) bool {
 	return true
 }
 
-func isLdap(username, pw string) bool {
+func isLdap(username, pw string) (uid string, ok bool) {
 	slog.D("user %s ldap start", username)
-	c := ldap.LDAPClient{}
-	if err := confix.Confix("Ldap", &cfg, &c); err != nil {
-		slog.P("confix failed: `%v'", err)
-		return false
-	}
+	c := cfg.Ldap
 	defer c.Close()
 
-	ok, _, err := c.Authenticate(username, pw)
+	ok, user, err := c.Authenticate(username, pw)
 	if err != nil {
 		slog.P("ldap error authenticating user `%s': %+v", username, err)
-		return false
+		return
 	}
 	if ok {
 		slog.D("ldap auth success for user: `%s'", username)
-		return true
+		uid = user["uidNumber"]
+		return
 	}
 
 	slog.P("ldap auth failed for user `%s'", username)
-	return false
+	return
 }
 
 func basicAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
@@ -242,41 +226,49 @@ func hasTooManyPasswdAttempts(username string, r *http.Request) bool {
 	return false
 }
 
-func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
-	u, p, ok := basicAuth(w, r)
+func isAuth(w http.ResponseWriter, r *http.Request) (username string, uid string, err error) {
+	username, passwd, ok := basicAuth(w, r)
 	if ok == false {
 		w.Header().Set(`X-Auth-Error`, fmt.Sprintf(`Mal-formed basic auth`))
-		return "", fmt.Errorf("Mal-formed basic auth")
+		err = fmt.Errorf("Mal-formed basic auth")
+		return
 	}
 
-	if u == "" || p == "" {
+	if username == "" || passwd == "" {
 		w.Header().Set(`X-Auth-Error`, fmt.Sprintf(`Mal-formed userid or password`))
-		return "", fmt.Errorf("Mal-formed userid or password")
+		err = fmt.Errorf("Mal-formed userid or password")
+		return
 	}
 
 	if cfg.TrimUserNames == true {
-		u = strings.TrimSpace(u)
+		username = strings.TrimSpace(username)
 	}
 
 	if cfg.DecapitalizeUserNames == true {
-		u = strings.ToLower(u)
+		username = strings.ToLower(username)
 	}
 
-	if hasTooManyPasswdAttempts(u, r) == true {
+	if hasTooManyPasswdAttempts(username, r) == true {
 		w.Header().Set(`X-Auth-Error`,
 			fmt.Sprintf(`Too many attempts, retry in %d seconds`, cfg.AuthFailWindow))
-		return "", fmt.Errorf("Too many authentication attempts, try back in %d seconds", cfg.AuthFailWindow)
+		err = fmt.Errorf("Too many authentication attempts, try back in %d seconds",
+			cfg.AuthFailWindow)
+		return
 	}
 
-	if isLdap(u, p) == true {
-		slog.D("user `%s' logged in from %s via %s", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
-		okClients[u] = append(okClients[u], client{remoteID(r), time.Now()})
-		return u, nil
+	uid, ok = isLdap(username, passwd)
+	if ok {
+		slog.D("user `%s' logged in from %s via %s",
+			username, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+		okClients[username] = append(okClients[username], client{remoteID(r), time.Now()})
+		return
 	}
 
-	slog.P("auth fail for `%s' from %s via %s", u, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
-	lastFails[u] = append(lastFails[u], client{time: time.Now()})
-	return "", fmt.Errorf("Authentication failed for `%s'", u)
+	slog.P("auth fail for `%s' from %s via %s",
+		username, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+	lastFails[username] = append(lastFails[username], client{time: time.Now()})
+	err = fmt.Errorf("Authentication failed for `%s'", username)
+	return
 }
 
 /* goroutines mux M:N to pthreads, so lock to one pthread to keep
@@ -287,7 +279,7 @@ func isAuth(w http.ResponseWriter, r *http.Request) (string, error) {
       in go1.10 runtime.ThreadExit() should arrive
 */
 func router(w http.ResponseWriter, r *http.Request) {
-	username, err := isAuth(w, r)
+	username, uid, err := isAuth(w, r)
 	if err != nil {
 		http.Error(w, err.Error(), 401)
 		return
@@ -295,7 +287,7 @@ func router(w http.ResponseWriter, r *http.Request) {
 
 	runtime.LockOSThread()
 
-	if hasFsPerms(username) == false {
+	if hasFsPerms(username, uid) == false {
 		http.Error(w, "FS error", 403)
 		return
 	}
