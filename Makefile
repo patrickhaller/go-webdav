@@ -1,7 +1,7 @@
 include Makefile.golang
 host = webdav.$(shell hostname --domain)
 
-test:
+test: build
 	scp $(name) $(host):/tmp/.
 	ssh -t $(host) /tmp/go-webdav -cf /usr/local/etc/webdav-debug.toml
 
