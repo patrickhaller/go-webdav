@@ -12,6 +12,8 @@ DecapitalizeUserNames = true
 AuthFailWindowSeconds = 300
 AuthFailMaxCount      = 100
 
+UIDAttribute = "uidNumber"
+
 [ldap]
 Base         = "dc=school,dc=edu"
 Host         = "ldap.school.edu"
@@ -21,4 +23,4 @@ BindDN       = ""
 BindPassword = ""
 UserFilter   = "(uid=%s)"
 GroupFilter  = "(memberUid=%s)"
-Attributes   = [ "givenName", "sn", "mail", "uid" ]
+Attributes   = [ "uid", "uidNumber" ]

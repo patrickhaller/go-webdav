@@ -26,7 +26,8 @@ var cfg struct {
 	Root                  string   // serve webdav from here
 	Roots                 []string // tho try first to serve webdav from here
 	Prefix                string   // prefix to strip from URL path
-	AuthFailWindow        int      //seconds
+	UIDAttribute          string   // LDAP attribute that has the users UID
+	AuthFailWindow        int      // seconds
 	AuthFailMaxCount      int
 	AuthFailLogPer        int // log too many auth fails every Nth fail
 	AuthClientsWindow     int // how long to keep record of clients
@@ -136,10 +137,10 @@ func isLdap(u, p string, davuser *davUser) (err error) {
 	}
 	slog.D("ldap auth success for user: `%s'", u)
 	davuser.name = u
-	davuser.uid, err = strconv.Atoi(ldapuser["uidNumber"])
+	davuser.uid, err = strconv.Atoi(ldapuser[cfg.UIDAttribute])
 	if err != nil {
 		return fmt.Errorf("failed integer conversion for user `%s' uid `%s': %v",
-			u, ldapuser["uidNumber"], err)
+			u, ldapuser[cfg.UIDAttribute], err)
 	}
 	return nil
 }
