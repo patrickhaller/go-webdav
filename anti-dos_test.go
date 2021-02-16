@@ -8,7 +8,7 @@ import (
 )
 
 func TestAntiDos(t *testing.T) {
-	// hasTooManyPasswdAttempts(username string, r *http.Request) bool {
+	// hasTooManyPasswordAttempts(username string, r *http.Request) bool {
 	username := "larry"
 	r, _ := http.NewRequest("GET", "/", nil)
 	r.Header.Add("X-Forwarded-For", "10.1.1.1")
@@ -25,7 +25,7 @@ func TestAntiDos(t *testing.T) {
 	})
 
 	// first attempt
-	if hasTooManyPasswdAttempts(username, r) == true {
+	if hasTooManyPasswordAttempts(username, r) == true {
 		t.Error("blocked on first attempt")
 	}
 	// ... they provide wrong passwd
@@ -40,7 +40,7 @@ func TestAntiDos(t *testing.T) {
 	}
 
 	// second attempt
-	if hasTooManyPasswdAttempts(username, r) == false {
+	if hasTooManyPasswordAttempts(username, r) == false {
 		t.Error("not blocked on second attempt")
 	}
 }
