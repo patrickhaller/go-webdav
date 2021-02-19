@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -162,7 +163,29 @@ func basicAuth(w http.ResponseWriter, r *http.Request) (user string, passwd stri
 	if len(pair) != 2 {
 		return "", "", fmt.Errorf("basic auth malformed? needs username:passwd")
 	}
-	return pair[0], pair[1], nil
+
+	user, passwd = pair[0], pair[1]
+	if user == "" || passwd == "" {
+		return "", "", fmt.Errorf("basic auth malformed? empty username:passwd")
+	}
+
+	matched, err := regexp.MatchString(`^[a-z][a-z_\.-]+$`, user)
+	if err != nil {
+		return "", "", fmt.Errorf("bad user match: %v", err)
+	}
+	if !matched {
+		return "", "", fmt.Errorf("bad user: `%v'", user)
+	}
+
+	matched, err = regexp.MatchString(`^[^'"]+$`, passwd)
+	if err != nil {
+		return "", "", fmt.Errorf("bad passwd match: %v", err)
+	}
+	if !matched {
+		return "", "", fmt.Errorf("bad passwd: `%v'", passwd)
+	}
+
+	return user, passwd, nil
 }
 
 func remoteID(r *http.Request) string {
