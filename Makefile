@@ -6,7 +6,7 @@ test: build
 	ssh -t $(host) /tmp/go-webdav -cf /usr/local/etc/webdav-debug.toml
 
 restart:
-	ssh $(host) systemctl stop $(name) || true
+	ssh $(host) rm /usr/local/bin/$(name)
 	scp $(name) $(host):/usr/local/bin/.
-	ssh $(host) systemctl start $(name)
+	ssh $(host) systemctl restart $(name)
 
